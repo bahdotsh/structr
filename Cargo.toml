@@ -1,9 +1,19 @@
 [package]
 name = "structr"
-version = "0.3.0"
+version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["bahdotsh <appu.yess@gmail.com>"]
 description = "Generate Rust structs from JSON data with framework integrations"
+documentation = "https://github.com/bahdotsh/structr"
+homepage = "https://github.com/bahdotsh/structr"
+repository = "https://github.com/bahdotsh/structr"
+keywords = ["json", "codegen", "struct", "serde", "cli"]
+categories = [
+    "command-line-utilities",
+    "development-tools",
+    "parsing",
+    "web-programming",
+]
 
 [dependencies]
 anyhow = "1.0"
