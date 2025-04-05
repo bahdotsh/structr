@@ -1,0 +1,68 @@
+{
+  "name": "John Doe",
+  "age": 30,
+  "is_active": true,
+  "height": 1.85,
+  "null_field": null,
+  "tags": ["developer", "rust", "json"],
+  "address": {
+    "street": "123 Main St",
+    "city": "Techville",
+    "zipcode": 12345,
+    "coordinates": {
+      "latitude": 37.7749,
+      "longitude": -122.4194
+    }
+  },
+  "contacts": [
+    {
+      "type": "email",
+      "value": "john.doe@example.com",
+      "primary": true
+    },
+    {
+      "type": "phone",
+      "value": "+1-555-123-4567",
+      "primary": false
+    }
+  ],
+  "skills": [
+    {
+      "name": "Rust Programming",
+      "level": 9,
+      "years_experience": 3
+    },
+    {
+      "name": "Web Development",
+      "level": 8,
+      "years_experience": 5
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor's",
+      "field": "Computer Science",
+      "institution": "Tech University",
+      "year": 2015
+    }
+  ],
+  "mixed_array": [42, "string", true, null, { "key": "value" }],
+  "empty_array": [],
+  "numbers": [1, 2, 3, 4, 5],
+  "nested_arrays": [
+    [1, 2],
+    [3, 4],
+    [5, 6]
+  ],
+  "type": "programmer",
+  "self": "reference",
+  "complex_nested": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "deep_value": "very nested"
+        }
+      }
+    }
+  }
+}
