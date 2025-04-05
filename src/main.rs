@@ -34,6 +34,34 @@ struct Args {
     /// Read JSON from stdin
     #[clap(long)]
     stdin: bool,
+
+    /// Generate code compatible with Actix web framework
+    #[clap(long)]
+    actix: bool,
+
+    /// Generate code compatible with Axum web framework
+    #[clap(long)]
+    axum: bool,
+
+    /// Generate code compatible with Rocket web framework
+    #[clap(long)]
+    rocket: bool,
+
+    /// Generate GraphQL schema
+    #[clap(long)]
+    graphql: bool,
+
+    /// GraphQL library to use (juniper or async-graphql)
+    #[clap(long, default_value = "async-graphql")]
+    graphql_lib: String,
+
+    /// Generate GraphQL schema file
+    #[clap(long)]
+    graphql_schema: bool,
+
+    /// Output directory for additional schema files
+    #[clap(long, default_value = ".")]
+    schema_dir: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -72,16 +100,27 @@ fn main() -> Result<()> {
         return Err(anyhow::anyhow!("No valid JSON input found"));
     }
 
+    // Create framework options
+    let framework_options = generator::FrameworkOptions {
+        actix: args.actix,
+        axum: args.axum,
+        rocket: args.rocket,
+        openapi: false, // Simplified implementation
+        graphql: args.graphql,
+        graphql_lib: args.graphql_lib.clone(),
+    };
+
+    // Create generator options
+    let generator_options = generator::GeneratorOptions {
+        strict_option: args.strict_option,
+        flatten: args.flatten,
+        framework: framework_options,
+    };
+
     // Generate Rust struct code
-    let rust_code = generator::generate_struct_from_samples(
-        &args.name,
-        &json_values,
-        &generator::GeneratorOptions {
-            strict_option: args.strict_option,
-            flatten: args.flatten,
-        },
-    )
-    .with_context(|| "Failed to generate struct code")?;
+    let rust_code =
+        generator::generate_struct_from_samples(&args.name, &json_values, &generator_options)
+            .with_context(|| "Failed to generate struct code")?;
 
     // Write the struct code to the output file
     fs::write(&args.output, rust_code)
@@ -91,5 +130,25 @@ fn main() -> Result<()> {
         "Successfully generated struct at: {}",
         args.output.display()
     );
+
+    // Generate GraphQL schema if requested
+    if args.graphql_schema {
+        let graphql_schema =
+            generator::generate_graphql_schema(&args.name, &json_values, &generator_options)?;
+        let graphql_path = args
+            .schema_dir
+            .join(format!("{}_graphql.graphql", args.name));
+        fs::write(&graphql_path, graphql_schema).with_context(|| {
+            format!(
+                "Failed to write GraphQL schema to: {}",
+                graphql_path.display()
+            )
+        })?;
+        println!(
+            "Successfully generated GraphQL schema at: {}",
+            graphql_path.display()
+        );
+    }
+
     Ok(())
 }

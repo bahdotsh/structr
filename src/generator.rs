@@ -6,9 +6,20 @@ use std::collections::{HashMap, HashSet};
 type StructMap = HashMap<String, String>;
 
 #[derive(Debug, Clone)]
+pub struct FrameworkOptions {
+    pub actix: bool,
+    pub axum: bool,
+    pub rocket: bool,
+    pub openapi: bool,
+    pub graphql: bool,
+    pub graphql_lib: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct GeneratorOptions {
     pub strict_option: bool, // Use Option<T> for all fields
     pub flatten: bool,       // Use #[serde(flatten)] for nested objects
+    pub framework: FrameworkOptions,
 }
 
 /// Generate Rust struct code from multiple JSON samples
@@ -21,7 +32,38 @@ pub fn generate_struct_from_samples(
         return Err(anyhow!("No JSON samples provided"));
     }
 
-    let mut code = String::from("use serde::{Serialize, Deserialize};\n\n");
+    let mut code = String::from("use serde::{Serialize, Deserialize};\n");
+
+    // Add framework-specific imports
+    if options.framework.openapi {
+        code.push_str("#[cfg(feature = \"openapi\")]\nuse utoipa::ToSchema;\n");
+    }
+
+    if options.framework.actix {
+        code.push_str("use actix_web::web;\n");
+    }
+
+    if options.framework.axum {
+        code.push_str("use axum::{extract::FromRef, extract::Path, extract::Query, Json};\n");
+    }
+
+    if options.framework.rocket {
+        code.push_str("use rocket::form::FromForm;\n");
+        code.push_str("use rocket::serde::{Serialize as RocketSerialize, Deserialize as RocketDeserialize};\n");
+    }
+
+    if options.framework.graphql {
+        if options.framework.graphql_lib == "juniper" {
+            code.push_str(
+                "#[cfg(feature = \"graphql\")]\nuse juniper::{GraphQLObject, graphql_object};\n",
+            );
+        } else {
+            code.push_str("#[cfg(feature = \"graphql\")]\nuse async_graphql::{SimpleObject, Object, Context};\n");
+        }
+    }
+
+    code.push_str("\n");
+
     let mut generated_structs = StructMap::new();
     let mut struct_names = HashSet::new();
 
@@ -38,13 +80,22 @@ pub fn generate_struct_from_samples(
         &mut generated_structs,
         &mut struct_names,
         options,
-        &samples,
+        samples,
     )?;
 
     // Add all generated structs to the output
     for struct_code in generated_structs.values() {
         code.push_str(struct_code);
         code.push_str("\n\n");
+    }
+
+    // Generate GraphQL resolvers if needed
+    if options.framework.graphql {
+        if options.framework.graphql_lib == "async-graphql" {
+            let resolver_code = generate_async_graphql_resolver(name, &struct_names);
+            code.push_str(&resolver_code);
+            code.push_str("\n\n");
+        }
     }
 
     Ok(code.trim().to_string())
@@ -155,10 +206,54 @@ fn generate_struct_recursive(
 
     match value {
         Value::Object(map) => {
-            let mut struct_code = format!(
-                "#[derive(Debug, Serialize, Deserialize)]\npub struct {} {{\n",
-                type_name
-            );
+            let mut struct_code = String::new();
+
+            // Add framework-specific derive macros
+            let mut derive_macros = vec!["Debug", "Serialize", "Deserialize"];
+
+            if options.framework.openapi {
+                derive_macros.push("#[cfg(feature = \"openapi\")]");
+                derive_macros.push("ToSchema");
+            }
+
+            if options.framework.actix {
+                derive_macros.push("actix_web::web::Query");
+                derive_macros.push("actix_web::web::Path");
+                derive_macros.push("actix_web::web::Json");
+            }
+
+            if options.framework.axum {
+                derive_macros.push("axum::extract::FromRef");
+                derive_macros.push("axum::extract::Path");
+                derive_macros.push("axum::extract::Query");
+            }
+
+            if options.framework.rocket {
+                derive_macros.push("FromForm");
+                derive_macros.push("RocketSerialize");
+                derive_macros.push("RocketDeserialize");
+            }
+
+            if options.framework.graphql {
+                if options.framework.graphql_lib == "juniper" {
+                    derive_macros.push("#[cfg(feature = \"graphql\")]");
+                    derive_macros.push("GraphQLObject");
+                } else {
+                    derive_macros.push("#[cfg(feature = \"graphql\")]");
+                    derive_macros.push("SimpleObject");
+                }
+            }
+
+            // Add the derive macros
+            struct_code.push_str(&format!("#[derive({})]\n", derive_macros.join(", ")));
+
+            // Add additional framework-specific attributes
+            if options.framework.graphql && options.framework.graphql_lib == "async-graphql" {
+                struct_code.push_str("#[cfg_attr(feature = \"graphql\", graphql(complex))]\n");
+            }
+
+            // Start the struct definition
+            struct_code.push_str(&format!("pub struct {} {{\n", type_name));
 
             for (key, val) in map {
                 let field_name = sanitize_field_name(key);
@@ -181,32 +276,94 @@ fn generate_struct_recursive(
                     field_type = format!("Option<{}>", field_type);
                 }
 
-                // Add serde annotations
-                if field_name != *key || options.flatten && val.is_object() {
-                    struct_code.push_str("    #[serde(");
+                // Add serde and framework annotations
+                let mut annotations = Vec::new();
+                let mut field_attributes = Vec::new();
 
-                    let mut annotations = Vec::new();
+                // Serde annotations
+                if field_name != *key || (options.flatten && val.is_object()) {
+                    let mut serde_attrs = Vec::new();
 
                     if field_name != *key {
-                        annotations.push(format!("rename = \"{}\"", key));
+                        serde_attrs.push(format!("rename = \"{}\"", key));
                     }
 
                     if options.flatten && val.is_object() {
-                        annotations.push("flatten".to_string());
+                        serde_attrs.push("flatten".to_string());
                     }
 
                     if is_optional || options.strict_option {
-                        annotations.push("skip_serializing_if = \"Option::is_none\"".to_string());
+                        serde_attrs.push("skip_serializing_if = \"Option::is_none\"".to_string());
                     }
 
-                    struct_code.push_str(&annotations.join(", "));
-                    struct_code.push_str(")]\n");
+                    if !serde_attrs.is_empty() {
+                        annotations.push(format!("serde({})", serde_attrs.join(", ")));
+                    }
                 }
 
+                // GraphQL annotations
+                if options.framework.graphql {
+                    if options.framework.graphql_lib == "juniper" {
+                        if field_name != *key {
+                            annotations.push(format!("graphql(name = \"{}\")", key));
+                        }
+                    } else {
+                        // async-graphql
+                        if field_name != *key {
+                            annotations.push(format!("name = \"{}\"", key));
+                        }
+                    }
+                }
+
+                // Add all annotations as attributes
+                if !annotations.is_empty() {
+                    for annotation in annotations {
+                        field_attributes.push(format!("    #[{}]\n", annotation));
+                    }
+                }
+
+                // Add attributes and field
+                for attr in field_attributes {
+                    struct_code.push_str(&attr);
+                }
                 struct_code.push_str(&format!("    pub {}: {},\n", field_name, field_type));
             }
 
             struct_code.push_str("}\n");
+
+            // Add implementation blocks for frameworks if needed
+            if options.framework.actix
+                || options.framework.axum
+                || options.framework.rocket
+                || options.framework.graphql
+            {
+                struct_code.push_str("\n");
+
+                // Actix implementation
+                if options.framework.actix {
+                    struct_code.push_str(&format!(
+                        "impl {} {{\n    pub fn into_json(self) -> actix_web::web::Json<Self> {{\n        actix_web::web::Json(self)\n    }}\n}}\n\n",
+                        type_name
+                    ));
+                }
+
+                // Axum implementation
+                if options.framework.axum {
+                    struct_code.push_str(&format!(
+                        "impl {} {{\n    pub fn into_json(self) -> axum::Json<Self> {{\n        axum::Json(self)\n    }}\n}}\n\n",
+                        type_name
+                    ));
+                }
+
+                // GraphQL implementation for Juniper
+                if options.framework.graphql && options.framework.graphql_lib == "juniper" {
+                    struct_code.push_str(&format!(
+                        "#[cfg(feature = \"graphql\")]\ngraphql_object!({}: () |{{ }})\n\n",
+                        type_name
+                    ));
+                }
+            }
+
             structs.insert(type_name.clone(), struct_code);
 
             Ok(type_name)
@@ -245,7 +402,7 @@ fn is_field_optional(samples: &[Value], field_name: &str) -> bool {
     })
 }
 
-/// Determine if we can create an enum for a field
+/// Try to create an enum for a field
 fn try_create_enum(field_name: &str, samples: &[Value], structs: &mut StructMap) -> Option<String> {
     // Collect all string values for this field
     let mut values = HashSet::new();
@@ -427,6 +584,164 @@ fn determine_array_item_type(
 
     // Mixed types or can't determine
     Ok("serde_json::Value".to_string())
+}
+
+/// Generate async-graphql resolver
+fn generate_async_graphql_resolver(name: &str, struct_names: &HashSet<String>) -> String {
+    let type_name = sanitize_struct_name(name);
+
+    let mut code = String::new();
+    code.push_str("#[cfg(feature = \"graphql\")]\n#[derive(Default)]\npub struct Query;\n\n");
+
+    code.push_str("#[cfg(feature = \"graphql\")]\n#[Object]\nimpl Query {\n");
+    for struct_name in struct_names {
+        let field_name = struct_name.to_case(Case::Snake);
+        code.push_str(&format!(
+            "    async fn get_{}(&self, ctx: &Context<'_>) -> Result<{}, async_graphql::Error> {{\n        // Add your resolver implementation here\n        unimplemented!()\n    }}\n\n",
+            field_name, struct_name
+        ));
+    }
+    code.push_str("}\n\n");
+
+    code.push_str("#[cfg(feature = \"graphql\")]\n#[derive(Default)]\npub struct Mutation;\n\n");
+
+    code.push_str("#[cfg(feature = \"graphql\")]\n#[Object]\nimpl Mutation {\n");
+    for struct_name in struct_names {
+        let field_name = struct_name.to_case(Case::Snake);
+        code.push_str(&format!(
+            "    async fn create_{}(&self, ctx: &Context<'_>, input: {}) -> Result<{}, async_graphql::Error> {{\n        // Add your resolver implementation here\n        unimplemented!()\n    }}\n\n",
+            field_name, struct_name, struct_name
+        ));
+
+        code.push_str(&format!(
+            "    async fn update_{}(&self, ctx: &Context<'_>, id: String, input: {}) -> Result<{}, async_graphql::Error> {{\n        // Add your resolver implementation here\n        unimplemented!()\n    }}\n\n",
+            field_name, struct_name, struct_name
+        ));
+
+        code.push_str(&format!(
+            "    async fn delete_{}(&self, ctx: &Context<'_>, id: String) -> Result<bool, async_graphql::Error> {{\n        // Add your resolver implementation here\n        unimplemented!()\n    }}\n\n",
+            field_name
+        ));
+    }
+    code.push_str("}\n\n");
+
+    // Add schema creation helper
+    code.push_str("#[cfg(feature = \"graphql\")]\n");
+    code.push_str(&format!(
+        "pub type {}Schema = async_graphql::Schema<Query, Mutation, async_graphql::EmptySubscription>;\n\n",
+        type_name
+    ));
+
+    code.push_str("#[cfg(feature = \"graphql\")]\n");
+    code.push_str(&format!(
+        "pub fn create_{}_schema() -> {}Schema {{\n    {}Schema::build(Query::default(), Mutation::default(), async_graphql::EmptySubscription::default()).finish()\n}}\n",
+        type_name.to_case(Case::Snake), type_name, type_name
+    ));
+
+    code
+}
+
+/// Generate GraphQL schema from JSON samples
+pub fn generate_graphql_schema(
+    name: &str,
+    samples: &[Value],
+    options: &GeneratorOptions,
+) -> Result<String> {
+    // Merge samples to get a complete schema
+    let merged_schema = if samples.len() == 1 {
+        samples[0].clone()
+    } else {
+        merge_json_samples(samples)?
+    };
+
+    let mut graphql_schema = String::new();
+    let type_name = sanitize_struct_name(name);
+
+    match merged_schema {
+        Value::Object(map) => {
+            // Create GraphQL type
+            graphql_schema.push_str(&format!("type {} {{\n", type_name));
+
+            for (key, val) in map {
+                let field_name = sanitize_field_name(&key);
+                let field_type = graphql_type_from_json(
+                    &val,
+                    &format!("{}_{}", type_name, key.to_case(Case::Pascal)),
+                    options,
+                )?;
+
+                // Determine if this field is optional by checking across samples
+                let is_optional = is_field_optional(samples, &key);
+
+                // In GraphQL, required fields have "!" at the end
+                let type_str = if !is_optional && !options.strict_option {
+                    format!("{field_type}!")
+                } else {
+                    field_type
+                };
+
+                graphql_schema.push_str(&format!("  {}: {}\n", field_name, type_str));
+            }
+
+            graphql_schema.push_str("}\n\n");
+
+            // Generate query
+            graphql_schema.push_str("type Query {\n");
+            graphql_schema.push_str(&format!("  get{}: {}\n", type_name, type_name));
+            graphql_schema.push_str("}\n\n");
+
+            // Generate mutation if appropriate
+            graphql_schema.push_str("type Mutation {\n");
+            graphql_schema.push_str(&format!("  create{0}: {0}\n", type_name));
+            graphql_schema.push_str(&format!("  update{0}(id: ID!): {0}\n", type_name));
+            graphql_schema.push_str(&format!("  delete{0}(id: ID!): Boolean!\n", type_name));
+            graphql_schema.push_str("}\n\n");
+
+            // Generate schema declaration
+            graphql_schema.push_str("schema {\n");
+            graphql_schema.push_str("  query: Query\n");
+            graphql_schema.push_str("  mutation: Mutation\n");
+            graphql_schema.push_str("}\n");
+
+            Ok(graphql_schema)
+        }
+        _ => Err(anyhow!(
+            "Root schema must be an object for GraphQL schema generation"
+        )),
+    }
+}
+
+/// Determine GraphQL type from JSON value
+fn graphql_type_from_json(value: &Value, name: &str, options: &GeneratorOptions) -> Result<String> {
+    match value {
+        Value::Null => Ok("String".to_string()),
+        Value::Bool(_) => Ok("Boolean".to_string()),
+        Value::Number(n) => {
+            if n.is_i64() {
+                Ok("Int".to_string())
+            } else {
+                Ok("Float".to_string())
+            }
+        }
+        Value::String(_) => Ok("String".to_string()),
+        Value::Array(items) => {
+            if items.is_empty() {
+                return Ok("[String]".to_string());
+            }
+
+            // Use first item to determine type
+            let item_type = graphql_type_from_json(&items[0], &format!("{}Item", name), options)?;
+
+            Ok(format!("[{}]", item_type))
+        }
+        Value::Object(_) => {
+            // For objects, use the name as the type
+            let type_name = sanitize_struct_name(name);
+
+            // Recursively define this type (handled separately)
+            Ok(type_name)
+        }
+    }
 }
 
 /// Sanitize struct names to be valid Rust identifiers

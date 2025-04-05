@@ -1,9 +1,9 @@
 [package]
 name = "structr"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-description = "Generate Rust structs from JSON data"
+description = "Generate Rust structs from JSON data with framework integrations"
 
 [dependencies]
 anyhow = "1.0"

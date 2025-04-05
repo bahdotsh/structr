@@ -1,6 +1,6 @@
 # structr
 
-A command-line tool for generating Rust structs from JSON data. Easily convert JSON samples into ready-to-use Rust struct definitions with serde support.
+A command-line tool for generating Rust structs from JSON data. Easily convert JSON samples into ready-to-use Rust struct definitions with serde support and framework integrations.
 
 [![Crates.io](https://img.shields.io/crates/v/structr.svg)](https://crates.io/crates/structr)
 [![License](https://img.shields.io/crates/l/structr.svg)](https://github.com/yourusername/structr/blob/main/LICENSE)
@@ -15,6 +15,11 @@ A command-line tool for generating Rust structs from JSON data. Easily convert J
 - Read from files or stdin
 - Detect and generate enums for string fields with limited values
 - Flatten nested objects with `serde(flatten)`
+- Generate code compatible with popular frameworks:
+  - Actix Web
+  - Axum
+  - Rocket
+- Generate GraphQL schema and resolvers
 
 ## Installation
 
@@ -76,6 +81,39 @@ Use `#[serde(flatten)]` for nested objects:
 structr --input data.json --flatten
 ```
 
+### Framework Integration
+
+Generate code with framework-specific annotations:
+
+```bash
+# Actix Web
+structr --input data.json --actix
+
+# Axum
+structr --input data.json --axum
+
+# Rocket
+structr --input data.json --rocket
+```
+
+### GraphQL Support
+
+Generate code with GraphQL support:
+
+```bash
+# Generate GraphQL-compatible structs with async-graphql
+structr --input data.json --graphql
+
+# Generate GraphQL-compatible structs with juniper
+structr --input data.json --graphql --graphql-lib juniper
+
+# Generate a GraphQL schema file
+structr --input data.json --graphql --graphql-schema
+
+# Specify output directory for schema
+structr --input data.json --graphql --graphql-schema --schema-dir ./schemas
+```
+
 ## Examples
 
 ### Input JSON
@@ -118,6 +156,113 @@ pub struct RootStruct {
 }
 ```
 
+### With Actix Web Support
+
+```rust
+use serde::{Serialize, Deserialize};
+use actix_web::web;
+
+#[derive(Debug, Serialize, Deserialize, actix_web::web::Query, actix_web::web::Path, actix_web::web::Json)]
+pub struct Dimensions {
+    pub width: i64,
+    pub height: i64,
+    pub unit: String,
+}
+
+impl Dimensions {
+    pub fn into_json(self) -> actix_web::web::Json<Self> {
+        actix_web::web::Json(self)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, actix_web::web::Query, actix_web::web::Path, actix_web::web::Json)]
+pub struct RootStruct {
+    pub id: i64,
+    pub name: String,
+    pub price: f64,
+    pub tags: Vec<String>,
+    pub dimensions: Dimensions,
+    pub in_stock: bool,
+}
+
+impl RootStruct {
+    pub fn into_json(self) -> actix_web::web::Json<Self> {
+        actix_web::web::Json(self)
+    }
+}
+```
+
+### With GraphQL Support
+
+```rust
+use serde::{Serialize, Deserialize};
+use async_graphql::{SimpleObject, Object, Context};
+
+#[derive(Debug, Serialize, Deserialize, SimpleObject)]
+#[graphql(complex)]
+pub struct Dimensions {
+    pub width: i64,
+    pub height: i64,
+    pub unit: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, SimpleObject)]
+#[graphql(complex)]
+pub struct RootStruct {
+    pub id: i64,
+    pub name: String,
+    pub price: f64,
+    pub tags: Vec<String>,
+    pub dimensions: Dimensions,
+    pub in_stock: bool,
+}
+
+#[derive(Default)]
+pub struct Query;
+
+#[Object]
+impl Query {
+    async fn get_dimensions(&self, ctx: &Context<'_>) -> Result<Dimensions, async_graphql::Error> {
+        // Add your resolver implementation here
+        unimplemented!()
+    }
+
+    async fn get_root_struct(&self, ctx: &Context<'_>) -> Result<RootStruct, async_graphql::Error> {
+        // Add your resolver implementation here
+        unimplemented!()
+    }
+}
+
+#[derive(Default)]
+pub struct Mutation;
+
+#[Object]
+impl Mutation {
+    async fn create_dimensions(&self, ctx: &Context<'_>, input: Dimensions) -> Result<Dimensions, async_graphql::Error> {
+        // Add your resolver implementation here
+        unimplemented!()
+    }
+
+    async fn update_dimensions(&self, ctx: &Context<'_>, id: String, input: Dimensions) -> Result<Dimensions, async_graphql::Error> {
+        // Add your resolver implementation here
+        unimplemented!()
+    }
+
+    async fn delete_dimensions(&self, ctx: &Context<'_>, id: String) -> Result<bool, async_graphql::Error> {
+        // Add your resolver implementation here
+        unimplemented!()
+    }
+
+    // ... more resolver methods for RootStruct
+}
+
+pub type RootStructSchema = async_graphql::Schema<Query, Mutation, async_graphql::EmptySubscription>;
+
+pub fn create_root_struct_schema() -> RootStructSchema {
+    RootStructSchema::build(Query::default(), Mutation::default(), async_graphql::EmptySubscription::default()).finish()
+}
+```
+
 ## Advanced Usage
 
 ### Enum Detection
@@ -156,7 +301,7 @@ pub struct RootStruct {
 
 ```bash
 # Use all features
-structr --input data.json --strict-option --flatten --name ApiResponse
+structr --input data.json --strict-option --flatten --name ApiResponse --actix --graphql --graphql-schema
 ```
 
 ## Contributing
