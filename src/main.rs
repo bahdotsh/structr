@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// CLI tool to generate Rust structs from JSON files or stdin
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
-struct Args {
+struct Structr {
     /// Input JSON file path(s)
     #[clap(short, long, value_parser)]
     input: Vec<PathBuf>,
@@ -65,7 +65,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let args = Structr::parse();
 
     // Determine if we should read from stdin
     let use_stdin = args.stdin || (args.input.is_empty() && !atty::is(atty::Stream::Stdin));
